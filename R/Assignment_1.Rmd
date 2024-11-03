@@ -1,0 +1,236 @@
+---
+title: "A Comprehensive Analysis of Snakebite Envenomation Rates and Venom Diversity Across Regions"
+author: "Mirza Ali Murtuza Ahmadi"
+date: "2024-10-04"
+output:
+  word_document: default
+  pdf_document: default
+---
+**Introduction**
+  Global snakebite envenoming is a leading cause of death among neglected tropical diseases (GBD 2019 Snakebite Envenomation Collaborators, 2022). Approximately 2.7 million people are envenomed by snakes each year, resulting in an estimated 81,000 to 138,000 deaths (Willyard, 2023). In addition, 400,000 individuals suffer permanent disabilities, with snakebites causing excruciating pain, oftentimes leading to severe swelling, kidney damage, and tissue death which would require amputation of skin grafting (Willyard, 2023). Small children are especially vulnerable to these effects (Willyard, 2023).
+  Due to the severity of snakebite envenomation, preventing death and injury is critical. One of the most effective treatments is antivenom, which neutralizes the toxins in snake venom (Leon et al., 2013). However, since different snake families produce different venom types, it is essential that countries most affected by envenomations have access to antivenoms in the correct proportions, tailored to the snake species prevalent in their regions (Leon et al., 2013). Therefore, using BOLD sampling data for venomous snakes in different regions, envenoming incidence rate data by country, and venom protein proportion data in different types of snake venom, this investigation looks to answer the question: How does the geographic distribution of envenomation rates correlate with the prevalence of viper and elapid species, and how can this information guide the regional prioritization of antivenom distribution? In this study, we will be focusing on the snake families Viperidae (vipers) and Elapidae (elapids) as they are two of the most medically significant snake families and are responsible for the majority of envenomings worldwide (Tasoulis and Isbister, 2017).
+
+Below is a my code and output figures that help to visualize envenoming incidence rate by country, viper/elapid proportions per country, and the differences in venom protein proportions/venom type in vipers and elapids.
+
+
+```{r}
+library(BiocManager)
+library(remotes)
+library(bold)
+library(tidyverse)
+library(readxl)
+library(maps)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(RColorBrewer)
+library(viridis)
+library(ggfortify)
+```
+
+```{r}
+# Loading and filtering data ----
+raw_external_envenomations_df <- read_excel("../data/Estimation of the total number of snake bite envenomings by country.xlsx")
+# Data inspection is done frequently to ensure the structure, type, organization of data set is understood before working with the data
+dim(raw_external_envenomations_df)
+names(raw_external_envenomations_df)
+
+# Only keep 'Country' and 'Incidence' columns as they are relevant for analysis
+external_envenomations_df <- raw_external_envenomations_df %>%
+  select(
+    Country,
+    `Incidence per 100 000 population (Lower)`,
+    `Incidence per 100 000 population (Higher)`
+  )
+names(external_envenomations_df)
+
+# Create average incidence rate from the higher and lower bounds in order to have a single, representative measure of envenoming incidence for each measure
+filtered_external_envenomations_df <- external_envenomations_df %>%
+  mutate(Average_Incidence_rate_per_100k = (`Incidence per 100 000 population (Lower)` + `Incidence per 100 000 population (Higher)`) / 2) %>%
+  select(Country, Average_Incidence_rate_per_100k)
+names(filtered_external_envenomations_df)
+
+# squamata_df <- as_tibble(bold_specimens(taxon='squamata'))
+squamata_df <- read_tsv("../data/squamata_data.tsv")
+dim(squamata_df)
+names(squamata_df)
+
+# Subset data to only include relevant venomous snake families for analysis
+vipers_elapids_df <- subset(squamata_df, family_name == c("Viperidae", "Elapidae"))
+dim(vipers_elapids_df)
+
+# Filter data to include only country and family_name for analyzing distinct family sampling by country
+filtered_countries_from_BOLD <- vipers_elapids_df %>%
+  select(country, family_name) %>%
+  distinct(country) %>%
+  mutate(across(where(is.character), ~ na_if(.x, ""))) %>%
+  filter(!is.na(country))
+names(filtered_countries_from_BOLD)
+
+
+# Load in venom protein proportion data in order to distinguish differing venom types of different snake families in analysis
+unique_species_df <- vipers_elapids_df %>%
+  distinct(species_name, .keep_all = TRUE)
+dim(unique_species_df)
+
+venom_proportions_df <- read_excel("../data/Venom Protein Proportion Data.xlsx") %>%
+  inner_join(unique_species_df, by = c("SPECIES" = "species_name")) %>%
+  select(SPECIES, PLA2, SVSP, SVMP, `3FT`, LAAO, CRiSP, `CTL/SNACLEC`, DIS, NP, KUN, VEGF, CYS, DEF, MPi, VT, family_name)
+dim(venom_proportions_df)
+names(venom_proportions_df)
+```
+
+
+```{r}
+# Figure 1: Create envenoming incidence map by country ----
+merged_country_incidence_df <- filtered_external_envenomations_df %>%
+  inner_join(filtered_countries_from_BOLD, by = c("Country" = "country"))
+
+# Merge country lat and long data to create a map of countries in order to visually represent envenoming incidence per country
+world_map <- map_data("world")
+merged_map_data <- world_map %>%
+  left_join(merged_country_incidence_df, by = c("region" = "Country")) %>%
+  select(-subregion)
+
+# The envenoming incidence rate is log-transformed because it makes it easier to interpret changes in incidence rates
+map <- ggplot(data = merged_map_data, aes(x = long, y = lat, group = group, fill = log(Average_Incidence_rate_per_100k + 1))) +
+  geom_polygon(color = "grey") +
+  scale_fill_viridis(option = "B", na.value = "grey80") +
+  labs(
+    title = "Global Snake Bite Envenoming Incidence Rate per 100,000 Population",
+    fill = "Log-Transformed Envenoming Incidence Rate"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    legend.position = c(0.17, 0.4),
+    legend.title = element_text(size = 11, face = "plain", hjust = 0, margin = margin(r = 10)),
+    legend.text = element_text(size = 10, hjust = 0.5),
+    legend.key.width = unit(2, "cm"),
+    legend.box.margin = margin(10, 10, 10, 10)
+  )
+
+print(map)
+
+```
+
+
+```{r}
+# Figure 2: Stacked bar chart of the most prevalent snake families in the top ten countries with the highest envenoming incidence ----
+BOLD_sampling_per_country_df <- vipers_elapids_df %>%
+  group_by(country) %>%
+  summarise(Count = n()) %>%
+  na.omit(country)
+
+# Select only the 10 most sampled countries to compare viper and elapid proportions in order to keep the graph clear and uncluttered
+most_sampled_countries <- BOLD_sampling_per_country_df %>%
+  arrange(desc(Count)) %>%
+  head(15) # The top 15 countries are specified, but only 10 appear in the figure because 5 of them are missing from the BOLD viper/elapid data set.
+
+
+family_proportions_per_country_df <- vipers_elapids_df %>%
+  select(country, family_name) %>%
+  mutate(across(where(is.character), ~ na_if(.x, ""))) %>%
+  filter(!is.na(country)) %>%
+  group_by(country) %>%
+  summarise(
+    Proportion_of_vipers_sampled = sum(family_name == "Viperidae") / (sum(family_name == "Viperidae") + sum(family_name == "Elapidae")),
+    Proportion_of_elapids_sampled = sum(family_name == "Elapidae") / (sum(family_name == "Elapidae") + sum(family_name == "Viperidae"))
+  ) %>%
+  ungroup() %>%
+  inner_join(merged_country_incidence_df, by = c("country" = "Country")) %>%
+  arrange(desc(Average_Incidence_rate_per_100k)) %>%
+  select(-Average_Incidence_rate_per_100k) %>%
+  filter(country %in% most_sampled_countries$country) %>%
+  mutate(country = factor(country, levels = most_sampled_countries$country))
+
+
+# Reshape data from wide to long format is done because it makes the data more manageable and ensuring compatibility with analytical tools and visualization libraries, leading to clearer insight
+data_long <- family_proportions_per_country_df %>%
+  pivot_longer(
+    cols = c(Proportion_of_vipers_sampled, Proportion_of_elapids_sampled),
+    names_to = "Snake_Family",
+    values_to = "Proportion"
+  ) %>%
+  mutate(country = factor(country, levels = most_sampled_countries$country)) # Set country as a factor to maintain order
+
+
+# Create the stacked bar chart
+ggplot(data_long, aes(x = country, y = Proportion, fill = Snake_Family)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(
+    values = c("#D32F2F", "#1976D2"),
+    labels = c("Elapidae", "Viperidae")
+  ) + # Set colors for viper and elapid
+  labs(
+    title = "Proportion of Sampled Vipers and Elapids by Country",
+    x = "Top 10 Most Sampled Countries",
+    y = "Proportion"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(family = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", family = "Helvetica"), # Adjusts title
+    legend.title = element_text(size = 11, face = "plain", hjust = 0, margin = margin(r = 10)), # Adjusts legend title
+    legend.text = element_text(size = 10, hjust = 0.5), # Adjusts legend text) # Rotate x-axis labels for better visibility
+  )
+```
+
+
+```{r}
+# Figure 3: Create PCA plot with venom protein proportion data ----
+# Centering is important for PCA as it prevents bias towards variables with larger means, ensuring accurate representation of variance.
+venom_protein_proportions_df.pca <- prcomp(venom_proportions_df[, c(2:15)], center = TRUE) # Filter to retain only numeric columns, as PCA requires numeric input.
+
+summary(venom_protein_proportions_df.pca)
+
+pca_scores <- as.data.frame(venom_protein_proportions_df.pca$x)
+
+# ensure the pca_scores data frame has an according species column as each point in the plot will represent a viper or elapid species
+pca_scores$SPECIES <- venom_proportions_df$SPECIES
+
+# Different colours are chosen to represent various snake venom types
+autoplot(venom_protein_proportions_df.pca,
+  data = venom_proportions_df,
+  colour = "VT",
+  shape = "family_name"
+) +
+  geom_point(aes(color = venom_proportions_df$VT, shape = venom_proportions_df$family_name), size = 3, alpha = 0.8) +
+  scale_color_manual(values = c("green", "cyan", "brown", "red", "blue", "magenta", "black"), name = "Venom Type") +
+  scale_shape(name = "Family") +
+  ggtitle("Principal Component Analysis of 14 Venom Protein Proportions") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    axis.title.x = element_text(face = "bold", size = 14),
+    axis.title.y = element_text(face = "bold", size = 14)
+  )
+```
+
+ 
+**Results and Discussion**
+ After analyzing data from multiple sources, I gained valuable insights into global snake venom distribution and the differences in venom types between vipers and elapids. The first figure illustrates the global incidence rate of snakebite envenomation, with varying colors representing different levels of envenomation. As expected, tropical countries near the equator, such as those in South America, Asia, and Africa, show the highest rates, likely due to increased species richness in these regions (Brown, 2014). The top three countries with the highest incidence rates are Guyana, Afghanistan, and Trinidad and Tobago. The second figure shows the proportions of vipers and elapids sampled in the top ten most sampled countries from the BOLD database. Vipers dominate in most countries and are ubiquitously sampled in Turkey, Japan, Iran, and Mexico. However, elapids are more prevalent in regions like India and South Africa, while some countries show a balanced proportion of both snake families. Lastly, the PCA plot illustrates significant differences in venom protein proportions and venom type between vipers and elapids. The distinct clustering of species reflects their evolutionary divergence, which was expected because vipers and elapids have been separate groups for the last 40-50 million years, enabling them to develop different venom types during this time (Reyes-Valesco et al., 2014).
+ These visualizations highlight crucial data for understanding snake venom distribution and envenomation risks, emphasizing the need to ensure an adequate supply of antivenoms in regions with high envenomation rates. Matching the supply of antivenoms to local snake species can prevent countless deaths and disabilities. Although there was sufficient data to address my original question, more data in terms of sampling, envenoming incidence rate and viper/elapid proportions per country would have definitely improved the scope of our project, allowing us to better understand how venomous snakes are distributed and in what proportions over a large number of countries. Future work could focus on expanding data collection, including smaller venomous species outside of Viperidae and Elapidae, and extending this approach to other venomous animals, such as lizards, scorpions and insects, to better assess antivenom needs globally for a range of venomous taxa.
+
+
+**Acknowledgements**
+  I am grateful for the support and advice from my classmates, which helped me complete a project I am proud of. Thomas Tekle guided me in refining my research question before I began coding, allowing me to approach it from different angles and ensure it was significant and data-rich. He also assisted me in correctly importing data from BOLD when I encountered errors. Isha Baxi and Dylan Harding provided valuable feedback on my figures, enhancing their readability and impact. For instance, Isha recommended reducing the number of countries sampled in Figure two, which improved clarity and highlighted the most relevant data. Additionally, after struggling for 45 minutes to load my TSV file of BOLD data into R, Dylan took only 30 seconds to identify that I had downloaded it as a .txt file instead, saving me potentially an hour of troubleshooting.
+
+
+ **References**
+
+Brown J. H. (2014). Why are there so many species in the tropics?. Journal of biogeography, 41(1), 8–22. https://doi.org/10.1111/jbi.12228
+
+GBD 2019 Snakebite Envenomation Collaborators. Global mortality of snakebite envenoming between 1990 and 2019. Nat Commun 13, 6160 (2022). https://doi.org/10.1038/s41467-022-33627-9
+
+Reyes-Velasco, J., Card, D. C., Andrew, A. L., Shaney, K. J., Adams, R. H., Schield, D. R., Casewell, N. R., Mackessy, S. P., & Castoe, T. A. (2015). Expression of venom gene homologs in diverse python tissues suggests a new model for the evolution of snake venom. Molecular biology and evolution, 32(1), 173–183. https://doi.org/10.1093/molbev/msu294
+
+Tasoulis, T., & Isbister, G. K. (2017). A Review and Database of Snake Venom Proteomes. Toxins, 9(9), 290. https://doi.org/10.3390/toxins9090290
+
+Willyard, C. (2023, September 20). Global mortality of snakebite envenoming between 1990 and 2019. Nature News. https://www.nature.com/articles/s41467-022-33627-9 
+
+
+
+
+
+
+
